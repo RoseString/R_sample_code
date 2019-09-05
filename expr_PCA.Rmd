@@ -1,0 +1,240 @@
+---
+title: "Expression clustering"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1.0 Format expression matrices (non-normalized and normalized matrices)
+```{r}
+Expr_no_norm.df <- read.table("~/Dropbox/1.Research/Clam_Work/DE_analysis/1.Expr_matrix/Cja_Csa.TPM.not_cross_norm")
+Expr_norm.df <- read.table("~/Dropbox/1.Research/Clam_Work/DE_analysis/1.Expr_matrix/Cja_Csa.TPM.TMM.EXPR.matrix")
+
+head(Expr_no_norm.df)
+head(Expr_norm.df)
+
+Expr_no_norm.log2.df <- as.data.frame(t(log2(Expr_no_norm.df[,1:24]+1)))
+Expr_norm.log2.df <- as.data.frame(t(log2(Expr_norm.df[,1:24]+1)))
+
+Expr_no_norm.log2.df <- Expr_no_norm.log2.df[,colSums(Expr_no_norm.log2.df^2) !=0]
+Expr_norm.log2.df <- Expr_norm.log2.df[,colSums(Expr_norm.log2.df^2) !=0]
+
+species <- c(rep("Cja",12), rep("Csa",12))
+tissues <- rep(c("Ad","F","G","M"), 6)
+```
+
+## 1.05 PCA
+```{r}
+Expr_no_norm.log2.PCA <- prcomp(Expr_no_norm.log2.df, center=T, scale. = T)
+Expr_norm.log2.PCA <- prcomp(Expr_norm.log2.df, center=T, scale. = T)
+plot(Expr_no_norm.log2.PCA, type = "l")
+plot(Expr_norm.log2.PCA, type = "l")
+```
+
+## Print PCA BEFORE normalization
+```{r}
+library(ggbiplot)
+g <- ggbiplot(Expr_no_norm.log2.PCA, choices = 1:2, obs.scale = 1, var.scale = 1, 
+              groups = species, ellipse = T, circle = T, var.axes = F, labels = rownames(Expr_no_norm.log2.PCA$x))
+g <- g + scale_color_discrete(name = '')
+g <- g + theme(legend.direction = 'horizontal', 
+               legend.position = 'top')
+print(g)
+
+g <- ggbiplot(Expr_no_norm.log2.PCA, choices = 2:3, obs.scale = 1, var.scale = 1, 
+              groups = tissues, ellipse = T, circle = T, var.axes = F, labels = rownames(Expr_no_norm.log2.PCA$x))
+g <- g + scale_color_discrete(name = '')
+g <- g + theme(legend.direction = 'horizontal', 
+               legend.position = 'top')
+print(g)
+```
+
+## 1.1 Print PCA AFTER normalization
+```{r}
+library(ggbiplot)
+library(grid)
+library(gridExtra)
+g1 <- ggbiplot(Expr_norm.log2.PCA, choices = 1:2, obs.scale = 1, var.scale = 1, 
+              groups = species, ellipse = T, circle = T, var.axes = F, labels = rownames(Expr_norm.log2.PCA$x))
+g1 <- g1 + scale_color_discrete(name = '')
+g1 <- g1 + theme_bw() + theme(legend.direction = 'horizontal',
+                            legend.position = "top") + coord_equal(0.2)
+
+g2 <- ggbiplot(Expr_norm.log2.PCA, choices = 2:3, obs.scale = 1, var.scale = 1, 
+              groups = tissues, ellipse = T, circle = T, var.axes = F, labels = rownames(Expr_norm.log2.PCA$x))
+g2 <- g2 + scale_color_discrete(name = '')
+g2 <- g2 + theme_bw() + theme(legend.direction = 'horizontal', 
+               legend.position = 'top') + coord_equal(0.4)
+grid.arrange(g1,g2,ncol=1)
+```
+
+## 1.2 NMDS (nonmetric multidimensional scaling)
+```{r}
+library(MASS)
+TPM.log2.df <- as.data.frame(t(log2(Expr_norm.df[,1:24]+1)))
+TPM.log2.df <- TPM.log2.df[,colSums(TPM.log2.df^2) !=0]
+TPM.log2.d <- dist(TPM.log2.df)
+
+# Three dimensions
+library(scatterplot3d)
+fit <- isoMDS(TPM.log2.d, k=3)
+NMDS_plot <- data.frame(matrix(data = row.names(fit$points), nrow = 24))
+NMDS_plot$x <- fit$points[,1] ## main coordinate that separates by species
+NMDS_plot$y <- fit$points[,2] ## tissue
+NMDS_plot$z <- fit$points[,3] ## tissue
+NMDS_plot$pcol <- matrix(NA, nrow=24)
+NMDS_plot[c(1,5,9,13,17,21),]$pcol = "red"  ## Ad
+NMDS_plot[c(2,6,10,14,18,22),]$pcol = "blue" ## F
+NMDS_plot[c(3,7,11,15,19,23),]$pcol = "black" ## G
+NMDS_plot[c(4,8,12,16,20,24),]$pcol = "green" ## M
+
+s3d <- with(NMDS_plot, scatterplot3d(y,z,x, color = pcol, pch=19, type="h", xlab = "NMDS2", ylab = "NMDS3", zlab = "NMDS1"))
+s3d.coords <- s3d$xyz.convert(NMDS_plot$y, NMDS_plot$z, NMDS_plot$x)
+text(s3d.coords$x, s3d.coords$y, labels = row.names(TPM.log2.df), cex=.7)
+```
+
+
+## 2.0 zFPKM formula
+```{r, echo=FALSE}
+z_fpkm<-function(i){
+  if(all(i>0)) stop('Input not log2 transformed.')
+  if(all(!is.na(i))) stop('0\'s need to be NA\'s.')
+  my<-density(i,na.rm=T)$x[which.max(density(i,na.rm=T)$y)]
+  U<-mean(i[i>my],na.rm=T)
+  sigma<-(U-my)*(.5*pi)^.5
+  z<-(i-my)/sigma
+  z[z< -3]<-NA
+  return(z)
+}
+```
+
+## 2.1 Format expression matrices (FPKM and zFPKM matrices)
+```{r}
+FPKM.df <- read.table("~/Dropbox/1.Research/Clam_Work/DE_analysis/1.Expr_matrix/Cja_Csa.FPKM.matrix")
+FPKM.df[FPKM.df == 0] <- NA
+head(FPKM.df)
+
+FPKM_log2.df <- as.data.frame(log2(FPKM.df[,1:24]))
+FPKM_log2_tp.df <- t(FPKM_log2.df)
+FPKM_log2_tp.df <- FPKM_log2_tp.df[,colSums(FPKM_log2_tp.df^2) !=0]
+idx <- apply(FPKM_log2_tp.df, 2, function(x) all(is.na(x)))
+FPKM_log2_tp.df <- FPKM_log2_tp.df[,!idx] ## 6373 genes
+
+zFPKM.df <- apply(FPKM_log2.df, 2, z_fpkm)
+zFPKM_tp.df <- t(zFPKM.df)
+zFPKM_tp.df <- zFPKM_tp.df[,colSums(zFPKM_tp.df^2) !=0]
+idx <- apply(zFPKM_tp.df, 2, function(x) all(is.na(x)))
+zFPKM_tp.df <- zFPKM_tp.df[,!idx] ## 6373 expressed genes (at least in one library)
+
+species <- c(rep("Cja",12), rep("Csa",12))
+tissues <- rep(c("Ad","F","G","M"), 6)
+```
+
+## 2.2 PCA
+```{r}
+FPKM_log2.PCA <- prcomp(FPKM_log2_tp.df, center=T, scale. = T)
+plot(FPKM_log2.PCA, type = "l")
+
+zFPKM.PCA <- prcomp(zFPKM_tp.df, center=T, scale. = T)
+plot(zFPKM.PCA, type = "l")
+```
+
+## 2.3 Print PCA for log2(FPKM)
+```{r}
+g1 <- ggbiplot(FPKM_log2.PCA, choices = 1:2, obs.scale = 1, var.scale = 1, 
+              groups = species, ellipse = T, circle = T, var.axes = F, labels = rownames(Expr_norm.log2.PCA$x))
+g1 <- g1 + scale_color_discrete(name = '')
+g1 <- g1 + theme_bw() + theme(legend.direction = 'horizontal',
+                            legend.position = "top") + coord_equal(0.4)
+
+g2 <- ggbiplot(FPKM_log2.PCA, choices = 2:3, obs.scale = 1, var.scale = 1, 
+              groups = tissues, ellipse = T, circle = T, var.axes = F, labels = rownames(Expr_norm.log2.PCA$x))
+g2 <- g2 + scale_color_discrete(name = '')
+g2 <- g2 + theme_bw() + theme(legend.direction = 'horizontal', 
+               legend.position = 'top') + coord_equal(0.4)
+grid.arrange(g1,g2,ncol=1)
+```
+
+
+## 2.4 Print PCA for zFPKM  normalization
+```{r}
+g1 <- ggbiplot(zFPKM.PCA, choices = 1:2, obs.scale = 1, var.scale = 1, 
+              groups = species, ellipse = T, circle = T, var.axes = F, labels = rownames(Expr_norm.log2.PCA$x))
+g1 <- g1 + scale_color_discrete(name = '')
+g1 <- g1 + theme_bw() + theme(legend.direction = 'horizontal',
+                            legend.position = "top") + coord_equal(0.4)
+
+g2 <- ggbiplot(zFPKM.PCA, choices = 2:3, obs.scale = 1, var.scale = 1, 
+              groups = tissues, ellipse = T, circle = T, var.axes = F, labels = rownames(Expr_norm.log2.PCA$x))
+g2 <- g2 + scale_color_discrete(name = '')
+g2 <- g2 + theme_bw() + theme(legend.direction = 'horizontal', 
+               legend.position = 'top') + coord_equal(0.4)
+grid.arrange(g1,g2,ncol=1)
+```
+
+
+
+## 2.5 NMDS (nonmetric multidimensional scaling) for log2(FPKM)
+```{r}
+library(MASS)
+FPKM_log2_tp.d <- dist(FPKM_log2_tp.df)
+
+# Three dimensions
+library(scatterplot3d)
+fit <- isoMDS(FPKM_log2_tp.d, k=3)
+NMDS_plot <- data.frame(matrix(data = row.names(fit$points), nrow = 24))
+NMDS_plot$x <- fit$points[,1] ## main coordinate that separates by species
+NMDS_plot$y <- fit$points[,2] ## tissue
+NMDS_plot$z <- fit$points[,3] ## tissue
+NMDS_plot$pcol <- matrix(NA, nrow=24)
+NMDS_plot[c(1,5,9,13,17,21),]$pcol = "red"  ## Ad
+NMDS_plot[c(2,6,10,14,18,22),]$pcol = "blue" ## F
+NMDS_plot[c(3,7,11,15,19,23),]$pcol = "black" ## G
+NMDS_plot[c(4,8,12,16,20,24),]$pcol = "green" ## M
+
+s3d <- with(NMDS_plot, scatterplot3d(y,z,x, color = pcol, pch=19, type="h", xlab = "NMDS2", ylab = "NMDS3", zlab = "NMDS1"))
+s3d.coords <- s3d$xyz.convert(NMDS_plot$y, NMDS_plot$z, NMDS_plot$x)
+text(s3d.coords$x, s3d.coords$y, labels = row.names(FPKM_log2_tp.df), cex=.7)
+```
+
+
+## 2.6 NMDS (nonmetric multidimensional scaling) for zFPKM
+```{r}
+library(MASS)
+zFPKM.d <- dist(zFPKM_tp.df)
+
+# Two dimensions
+fit <- isoMDS(zFPKM.d, k=2)
+NMDS_plot <- data.frame(matrix(data = row.names(fit$points), nrow = 24))
+NMDS_plot$x <- fit$points[,1] ## main coordinate that separates by species
+NMDS_plot$y <- fit$points[,2] ## tissue
+NMDS_plot$pcol <- matrix(NA, nrow=24)
+NMDS_plot[c(1,5,9,13,17,21),]$pcol = "red"  ## Ad
+NMDS_plot[c(2,6,10,14,18,22),]$pcol = "blue" ## F
+NMDS_plot[c(3,7,11,15,19,23),]$pcol = "black" ## G
+NMDS_plot[c(4,8,12,16,20,24),]$pcol = "green" ## M
+
+with(NMDS_plot, plot(x, y, xlab="NMDS 1", ylab="NMDS 2", 
+  main="zFPKM nonmetric multi-dimensional scaling (NMDS)",	type="n"))
+text(NMDS_plot$x, NMDS_plot$y, labels = row.names(zFPKM_tp.df), cex=.7, col = NMDS_plot$pcol)
+
+# Three dimensions
+library(scatterplot3d)
+fit <- isoMDS(zFPKM.d, k=3)
+NMDS_plot <- data.frame(matrix(data = row.names(fit$points), nrow = 24))
+NMDS_plot$x <- fit$points[,1] ## main coordinate that separates by species
+NMDS_plot$y <- fit$points[,2] ## tissue
+NMDS_plot$z <- fit$points[,3] ## tissue
+NMDS_plot$pcol <- matrix(NA, nrow=24)
+NMDS_plot[c(1,5,9,13,17,21),]$pcol = "red"  ## Ad
+NMDS_plot[c(2,6,10,14,18,22),]$pcol = "blue" ## F
+NMDS_plot[c(3,7,11,15,19,23),]$pcol = "black" ## G
+NMDS_plot[c(4,8,12,16,20,24),]$pcol = "green" ## M
+
+s3d <- with(NMDS_plot, scatterplot3d(y,z,x, color = pcol, pch=19, type="h", xlab = "NMDS2", ylab = "NMDS3", zlab = "NMDS1"))
+s3d.coords <- s3d$xyz.convert(NMDS_plot$y, NMDS_plot$z, NMDS_plot$x)
+text(s3d.coords$x, s3d.coords$y, labels = row.names(zFPKM_tp.df), cex=.7)
+```
+
